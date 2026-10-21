@@ -1,0 +1,93 @@
+
+name: DevSecOps Security Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-scan:
+    name: Test and Scan Application
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+
+      - name: Run unit tests
+        run: python -m pytest -v
+
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@v0.2.3
+        with:
+          version: latest
+
+      - name: Scan source and configuration
+        id: filesystem-scan
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          trivy fs \
+            --scanners vuln,secret,misconfig \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --format json \
+            --output reports/filesystem-security.json \
+            .
+
+      - name: Build Docker image
+        run: docker build -t devsecops-ia:latest .
+
+      - name: Scan Docker image
+        id: image-scan
+        continue-on-error: true
+        run: |
+          trivy image \
+            --scanners vuln,secret \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --format json \
+            --output reports/image-security.json \
+            devsecops-ia:latest
+
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: devsecops-security-reports
+          path: reports/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Enforce security gate
+        if: always()
+        env:
+          TEST_OUTCOME: ${{ steps.filesystem-scan.outcome }}
+          IMAGE_OUTCOME: ${{ steps.image-scan.outcome }}
+          TEST_JOB_STATUS: ${{ job.status }}
+        run: |
+          if [ "$TEST_OUTCOME" != "success" ] || [ "$IMAGE_OUTCOME" != "success" ]; then
+            echo "SECURITY GATE: FAILED"
+            echo "Filesystem scan: $TEST_OUTCOME"
+            echo "Image scan: $IMAGE_OUTCOME"
+            exit 1
+          fi
+          echo "SECURITY GATE: PASSED"
