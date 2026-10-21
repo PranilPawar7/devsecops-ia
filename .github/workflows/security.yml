@@ -30,21 +30,25 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pytest
+          python -m pip install -r requirements.txt pytest
 
       - name: Run unit tests
+        id: tests
         run: python -m pytest -v
 
       - name: Install Trivy
-        uses: aquasecurity/setup-trivy@v0.2.3
+        uses: aquasecurity/setup-trivy@v0.2.6
         with:
-          version: latest
+          version: v0.69.3
+
+      - name: Prepare reports directory
+        if: always()
+        run: mkdir -p reports
 
       - name: Scan source and configuration
         id: filesystem-scan
         continue-on-error: true
         run: |
-          mkdir -p reports
           trivy fs \
             --scanners vuln,secret,misconfig \
             --severity HIGH,CRITICAL \
@@ -80,14 +84,19 @@ jobs:
       - name: Enforce security gate
         if: always()
         env:
-          TEST_OUTCOME: ${{ steps.filesystem-scan.outcome }}
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
+          FILESYSTEM_OUTCOME: ${{ steps.filesystem-scan.outcome }}
           IMAGE_OUTCOME: ${{ steps.image-scan.outcome }}
-          TEST_JOB_STATUS: ${{ job.status }}
         run: |
-          if [ "$TEST_OUTCOME" != "success" ] || [ "$IMAGE_OUTCOME" != "success" ]; then
+          echo "Tests: $TEST_OUTCOME"
+          echo "Filesystem scan: $FILESYSTEM_OUTCOME"
+          echo "Image scan: $IMAGE_OUTCOME"
+
+          if [ "$TEST_OUTCOME" != "success" ] || \
+             [ "$FILESYSTEM_OUTCOME" != "success" ] || \
+             [ "$IMAGE_OUTCOME" != "success" ]; then
             echo "SECURITY GATE: FAILED"
-            echo "Filesystem scan: $TEST_OUTCOME"
-            echo "Image scan: $IMAGE_OUTCOME"
             exit 1
           fi
+
           echo "SECURITY GATE: PASSED"
