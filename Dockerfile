@@ -1,20 +1,21 @@
 
-FROM python:3.12-slim
+FROM python:3.12-alpine
 
 WORKDIR /app
 
-# Update operating-system packages
-RUN apt-get update \
-    && apt-get upgrade -y \
-    && rm -rf /var/lib/apt/lists/*
+# Apply available Alpine package updates
+RUN apk upgrade --no-cache
 
-# Install updated pip and application dependencies
 COPY requirements.txt .
-RUN python -m pip install --no-cache-dir --upgrade pip setuptools urllib3 msgpack \
+
+RUN python -m pip install --no-cache-dir --upgrade \
+    pip \
+    "setuptools>=78.1.1" \
+    "urllib3>=2.8.0" \
+    "msgpack>=1.2.1" \
     && python -m pip install --no-cache-dir -r requirements.txt
 
-# Create a non-root user
-RUN useradd --create-home --uid 10001 appuser
+RUN adduser -D -u 10001 appuser
 
 COPY --chown=appuser:appuser app/ ./app/
 
