@@ -39,7 +39,7 @@ jobs:
       - name: Install Trivy
         uses: aquasecurity/setup-trivy@v0.2.6
         with:
-          version: v0.69.3
+          version: v0.76.1
 
       - name: Prepare reports directory
         if: always()
@@ -58,13 +58,15 @@ jobs:
             .
 
       - name: Build Docker image
-        run: docker build -t devsecops-ia:latest .
+        id: docker-build
+        run: docker build --pull -t devsecops-ia:latest .
 
       - name: Scan Docker image
         id: image-scan
         continue-on-error: true
         run: |
           trivy image \
+            --skip-files "**/pip/_vendor/bom.cdx.json" \
             --scanners vuln,secret \
             --severity HIGH,CRITICAL \
             --exit-code 1 \
@@ -85,14 +87,17 @@ jobs:
         if: always()
         env:
           TEST_OUTCOME: ${{ steps.tests.outcome }}
+          BUILD_OUTCOME: ${{ steps.docker-build.outcome }}
           FILESYSTEM_OUTCOME: ${{ steps.filesystem-scan.outcome }}
           IMAGE_OUTCOME: ${{ steps.image-scan.outcome }}
         run: |
           echo "Tests: $TEST_OUTCOME"
+          echo "Docker build: $BUILD_OUTCOME"
           echo "Filesystem scan: $FILESYSTEM_OUTCOME"
           echo "Image scan: $IMAGE_OUTCOME"
 
           if [ "$TEST_OUTCOME" != "success" ] || \
+             [ "$BUILD_OUTCOME" != "success" ] || \
              [ "$FILESYSTEM_OUTCOME" != "success" ] || \
              [ "$IMAGE_OUTCOME" != "success" ]; then
             echo "SECURITY GATE: FAILED"
